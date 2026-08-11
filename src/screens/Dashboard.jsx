@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { 
   BookOpen, Trophy, Target, Award, PlayCircle, GraduationCap,
   TrendingUp, Zap, Calendar, LogOut, Settings,
-  Sparkles, ChevronRight, Clock, BarChart3, Users
+  Sparkles, ChevronRight,
 } from 'lucide-react';
 
 const Dashboard = ({ setCurrentMode }) => {
