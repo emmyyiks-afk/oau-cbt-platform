@@ -26,9 +26,9 @@ const PracticeSubjectSelect = lazy(() => import('./screens/PracticeSubjectSelect
 
 // 🔐 ADMIN CONFIGURATION
 const ADMIN_CONFIG = {
-  adminEmail: 'admin@example.com',
-  adminUid: 'wcsv5xGdcdO2y5CwUNEKJcvqO7m1',
-  adminEmails: ['admin@example.com', 'superadmin@example.com']
+  adminEmail: 'JoasAdmin400@gmail.com',
+  adminUid: 'iJcN9eErxDcMO40WRL0jeLwHzku1',
+  adminEmails: ['admin400@gmail.com', 'superadmin400@gmail.com', 'JoasAdmin400@gmail.com']
 };
 
 const ScreenLoader = () => (
