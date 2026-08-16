@@ -1,4 +1,4 @@
-// src/App.js - FIXED VERSION (forced fresh login, race condition fixed)
+// src/App.js - COMPLETE WITH LOCK MODAL (FULLY CORRECTED)
 import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
 import './App.css';
 import { 
@@ -12,12 +12,17 @@ import {
 } from './firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
 
+// 🔥 IMPORT LUCIDE ICONS - ALL NEEDED ICONS
+import { 
+  Lock, Eye, EyeOff, ChevronRight, GraduationCap,
+  Lightbulb, Trophy, UserPlus, Headphones, Mail,
+  Shield, AlertCircle, XCircle, Banknote, Phone
+} from 'lucide-react';
+
 // Import lightweight screens normally
 import Dashboard from './screens/Dashboard';
 
-// 🔥 Lazy-load the heavy screens — their question-bank imports (15 subjects
-// each) now only load when the user actually navigates there, instead of
-// bloating the very first page load.
+// 🔥 Lazy-load the heavy screens
 const AdminDashboard = lazy(() => import('./screens/AdminDashboard'));
 const PracticeMode = lazy(() => import('./screens/PracticeMode'));
 const ExamScreen = lazy(() => import('./screens/ExamScreen'));
@@ -29,6 +34,15 @@ const ADMIN_CONFIG = {
   adminEmail: 'adebisi@gmail.com',
   adminUid: '2yQRKgq0fBPR94XpY2nHGmFSs3m1',
   adminEmails: ['admin400@gmail.com', 'superadmin400@gmail.com', 'adebisi@gmail.com']
+};
+
+// 🔥 ADMIN BANK DETAILS - UPDATE THESE WITH YOUR ACTUAL DETAILS
+const ADMIN_BANK_DETAILS = {
+  bankName: 'Opay Bank',
+  accountName: 'Akinyemi Oluwayinka Ayomide',
+  accountNumber: '9151485641',
+  phoneNumber: '+2349151485641',
+  whatsappMessage: '09151485641'
 };
 
 const ScreenLoader = () => (
@@ -45,15 +59,12 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // 🔥 True once the one-time "clear any cached session" check has fully
-  // finished. Until then we show a loader — never the dashboard, never
-  // the login form — so nothing can flash on screen prematurely.
-  const [authReady, setAuthReady] = useState(false);
+  // 🔥 Lock modal state
+  const [showLockModal, setShowLockModal] = useState(false);
+  const [lockMessage, setLockMessage] = useState('');
+  const [lockEmail, setLockEmail] = useState('');
 
-  // 🔥 Ref, not state: needs to update synchronously *inside* the
-  // onAuthStateChanged callback itself, and must NOT trigger a re-render
-  // or re-subscribe the listener. Tracks whether we've already performed
-  // the one-time forced sign-out for this page load.
+  const [authReady, setAuthReady] = useState(false);
   const hasForcedSignOutRef = useRef(false);
 
   // Quiz states
@@ -102,19 +113,7 @@ function App() {
     }
   }, []);
 
-  // 🔥 THE ACTUAL FIX: onAuthStateChanged is the ONLY reliable way to know
-  // whether Firebase has restored a cached session, because auth.currentUser
-  // is not guaranteed to be populated synchronously on page load — checking
-  // it directly (the previous attempt) missed the cached session because it
-  // ran before Firebase finished restoring it.
-  //
-  // Instead: the FIRST time this listener ever reports a user, on this page
-  // load, we immediately sign them out WITHOUT touching any UI state (no
-  // dashboard, no user data set — nothing). That sign-out then triggers
-  // another callback with `firebaseUser = null`, which is when we finally
-  // mark auth as ready and show the login screen. A real, explicit login
-  // later (via handleLogin) works normally, because by then
-  // hasForcedSignOutRef.current is already true.
+  // 🔥 onAuthStateChanged listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser && !hasForcedSignOutRef.current) {
@@ -123,16 +122,14 @@ function App() {
           await auth.signOut();
         } catch (err) {
           console.log('Error forcing fresh sign-out:', err);
-          setAuthReady(true); // don't get stuck on a loader forever if this fails
+          setAuthReady(true);
         }
-        // Do nothing else here — wait for the resulting null callback below.
         return;
       }
 
       hasForcedSignOutRef.current = true;
 
       if (firebaseUser) {
-        // A real login (explicit, post-forced-signout) — process normally.
         const isUserAdmin = checkIfAdmin(firebaseUser);
         
         const userData = {
@@ -196,6 +193,14 @@ function App() {
     }
   };
 
+  // 🔥 Close lock modal
+  const closeLockModal = () => {
+    setShowLockModal(false);
+    setLockEmail('');
+    setLockMessage('');
+  };
+
+  // 🔥 handleLogin with lock check
   const handleLogin = async (email, password, isAdminLogin = false) => {
     setLoading(true);
     setError('');
@@ -212,15 +217,75 @@ function App() {
         return;
       }
       
+      // 🔥 Check if user is locked BEFORE proceeding (for regular users)
       let docSnap = null;
-      if (!isAdminLogin) {
-        const docRef = doc(db, 'users', firebaseUser.uid);
-        docSnap = await getDoc(docRef);
-        if (!docSnap.exists()) {
-          setError('❌ Account not found. Please contact admin for access.');
-          setLoading(false);
-          await auth.signOut();
-          return;
+      if (!isAdminLogin && !isUserAdmin) {
+        try {
+          const docRef = doc(db, 'users', firebaseUser.uid);
+          docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+            const userData = docSnap.data();
+            
+            // 🔥 CHECK IF USER IS LOCKED
+            if (userData.status === 'locked') {
+              setLockEmail(email);
+              setLockMessage(userData.lockReason || 'Your account has been locked due to payment issues.');
+              setShowLockModal(true);
+              setLoading(false);
+              await auth.signOut();
+              return;
+            }
+            
+            if (userData.status === 'inactive') {
+              setError('❌ Your account has been suspended. Please contact admin.');
+              setLoading(false);
+              await auth.signOut();
+              return;
+            }
+          } else {
+            // Check localStorage fallback
+            const storedUsers = localStorage.getItem('cbt_users');
+            if (storedUsers) {
+              const usersList = JSON.parse(storedUsers);
+              const foundUser = usersList.find(u => u.email === email);
+              if (foundUser && foundUser.status === 'locked') {
+                setLockEmail(email);
+                setLockMessage('Your account has been locked due to payment issues.');
+                setShowLockModal(true);
+                setLoading(false);
+                await auth.signOut();
+                return;
+              }
+              if (!foundUser) {
+                setError('❌ Account not found. Please contact admin for access.');
+                setLoading(false);
+                await auth.signOut();
+                return;
+              }
+            } else {
+              setError('❌ Account not found. Please contact admin for access.');
+              setLoading(false);
+              await auth.signOut();
+              return;
+            }
+          }
+        } catch (firestoreError) {
+          console.warn('⚠️ Firestore check failed:', firestoreError);
+          // Check localStorage fallback
+          const storedUsers = localStorage.getItem('cbt_users');
+          if (storedUsers) {
+            const usersList = JSON.parse(storedUsers);
+            const foundUser = usersList.find(u => u.email === email);
+            if (foundUser && foundUser.status === 'locked') {
+              setLockEmail(email);
+              setLockMessage('Your account has been locked due to payment issues.');
+              setShowLockModal(true);
+              setLoading(false);
+              await auth.signOut();
+              return;
+            }
+          }
         }
       }
       
@@ -240,7 +305,23 @@ function App() {
       setShowAdminLogin(false);
       
     } catch (error) {
-      setError(error.message || '❌ Login failed. Please check your credentials.');
+      console.error('❌ Login error:', error);
+      switch (error.code) {
+        case 'auth/user-not-found':
+          setError('❌ No account found with this email.');
+          break;
+        case 'auth/wrong-password':
+          setError('❌ Incorrect password. Please try again.');
+          break;
+        case 'auth/invalid-email':
+          setError('❌ Invalid email address.');
+          break;
+        case 'auth/too-many-requests':
+          setError('❌ Too many failed attempts. Please try again later.');
+          break;
+        default:
+          setError(error.message || '❌ Login failed. Please check your credentials.');
+      }
     } finally {
       setLoading(false);
     }
@@ -276,48 +357,144 @@ function App() {
     }
   };
 
+  // 🔥 RENDER LOGIN WITH LOCK MODAL
   const renderLogin = () => (
-    <div className="login-container">
-      <div className="login-card">
-        <div className="login-header">
-          <h1>📚 JOAS CBT</h1>
-          <p>Post-UTME Practice Platform</p>
-        </div>
-        
-        <h2>{showAdminLogin ? '🛡️ Admin Login' : 'Welcome Back!'}</h2>
-        
-        {error && <div className="error-message">{error}</div>}
-        
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          const email = e.target.email.value;
-          const password = e.target.password.value;
-          handleLogin(email, password, showAdminLogin);
-        }}>
-          <div className="form-group">
-            <label>Email Address</label>
-            <input type="email" name="email" placeholder="Enter your email" required />
+    <>
+      <div className="login-container">
+        <div className="login-card">
+          <div className="login-header">
+            <h1>📚 JOAS CBT</h1>
+            <p>Post-UTME Practice Platform</p>
           </div>
-          <div className="form-group">
-            <label>Password</label>
-            <input type="password" name="password" placeholder="Enter your password" required />
+          
+          <h2>{showAdminLogin ? '🛡️ Admin Login' : 'Welcome Back!'}</h2>
+          
+          {error && <div className="error-message">{error}</div>}
+          
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const email = e.target.email.value;
+            const password = e.target.password.value;
+            handleLogin(email, password, showAdminLogin);
+          }}>
+            <div className="form-group">
+              <label>Email Address</label>
+              <input type="email" name="email" placeholder="Enter your email" required />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input type="password" name="password" placeholder="Enter your password" required />
+            </div>
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? '⏳ Logging in...' : (showAdminLogin ? '🔑 Admin Login' : '🔑 Login')}
+            </button>
+          </form>
+          
+          <div className="login-options">
+            <button onClick={() => setShowAdminLogin(!showAdminLogin)} className="toggle-admin-btn">
+              {showAdminLogin ? '👤 Switch to User Login' : '🛡️ Admin Login'}
+            </button>
           </div>
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? '⏳ Logging in...' : (showAdminLogin ? '🔑 Admin Login' : '🔑 Login')}
-          </button>
-        </form>
-        
-        <div className="login-options">
-          <button onClick={() => setShowAdminLogin(!showAdminLogin)} className="toggle-admin-btn">
-            {showAdminLogin ? '👤 Switch to User Login' : '🛡️ Admin Login'}
-          </button>
+          
+          <p className="login-hint">
+            {showAdminLogin ? 'Enter your admin credentials' : 'Contact admin for your credentials'}
+          </p>
         </div>
-        
-        <p className="login-hint">
-          {showAdminLogin ? 'Enter your admin credentials' : 'Contact admin for your credentials'}
-        </p>
       </div>
-    </div>
+
+      {/* 🔥 LOCK MODAL - Shows when user is locked */}
+      {showLockModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-gray-100 max-h-[90vh] overflow-y-auto relative">
+            {/* Close Button */}
+            <button 
+              onClick={closeLockModal}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"
+            >
+              <XCircle className="w-6 h-6" />
+            </button>
+
+            {/* Header */}
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Lock className="w-10 h-10 text-red-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800">Account Locked 🔒</h2>
+              <p className="text-gray-500 text-sm mt-1">
+                Your account has been temporarily locked
+              </p>
+            </div>
+
+            {/* Message */}
+            <div className="bg-red-50 p-4 rounded-xl border border-red-200 mb-6">
+              <p className="text-sm text-red-700 text-center">
+                {lockMessage || 'Your account has been locked due to payment issues.'}
+              </p>
+              <p className="text-xs text-red-500 text-center mt-1">
+                Account: <span className="font-medium">{lockEmail}</span>
+              </p>
+            </div>
+
+            {/* Admin Bank Details */}
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 mb-6">
+              <h3 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                <Banknote className="w-4 h-4" />
+                Payment Instructions
+              </h3>
+              <p className="text-xs text-gray-600 mb-3">
+                To unlock your account, please make payment to the account below and contact admin for verification.
+              </p>
+              
+              <div className="space-y-2 bg-white p-3 rounded-lg border border-blue-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Bank</span>
+                  <span className="text-sm font-semibold text-gray-800">{ADMIN_BANK_DETAILS.bankName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Account Name</span>
+                  <span className="text-sm font-semibold text-gray-800">{ADMIN_BANK_DETAILS.accountName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Account Number</span>
+                  <span className="text-sm font-bold text-blue-600">{ADMIN_BANK_DETAILS.accountNumber}</span>
+                </div>
+                <div className="border-t border-gray-100 pt-2 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500 flex items-center gap-1">
+                      <Phone className="w-3 h-3" /> Contact
+                    </span>
+                    <span className="text-sm font-semibold text-gray-800">{ADMIN_BANK_DETAILS.phoneNumber}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => {
+                  window.location.href = `tel:${ADMIN_BANK_DETAILS.phoneNumber}`;
+                }}
+                className="w-full px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
+              >
+                <Phone className="w-4 h-4" />
+                Contact Admin
+              </button>
+              <button
+                onClick={closeLockModal}
+                className="w-full px-4 py-3 border-2 border-gray-200 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="text-center text-xs text-gray-400 mt-4">
+              After payment, contact admin to unlock your account.
+            </p>
+          </div>
+        </div>
+      )}
+    </>
   );
 
   const renderUserDashboard = () => <Dashboard setCurrentMode={handleSetMode} />;
@@ -351,8 +528,7 @@ function App() {
     />
   );
 
-  // Still checking / force-clearing any cached session — show a loader,
-  // never the dashboard, never the login form yet.
+  // Still checking / force-clearing any cached session — show a loader
   if (!authReady) {
     return <ScreenLoader />;
   }

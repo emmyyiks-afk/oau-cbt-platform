@@ -1,4 +1,4 @@
-// src/screens/AdminDashboard.jsx
+// src/screens/AdminDashboard.jsx - COMPLETE WITH LOCK FEATURE
 import React, { useState, useEffect } from 'react';
 import { 
   collection, doc, setDoc, getDocs, deleteDoc, 
@@ -16,7 +16,7 @@ import {
   LogOut, Plus, Trash2, Eye, EyeOff, Shield,
   Mail, Phone, Lock, User, GraduationCap, Database,
   RefreshCw, CheckCircle, XCircle, AlertCircle, Crown,
-  Search, Filter
+  Search, Filter, Unlock
 } from 'lucide-react';
 
 const AdminDashboard = () => {
@@ -30,6 +30,8 @@ const AdminDashboard = () => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [resetPasswordData, setResetPasswordData] = useState(null);
+  const [lockConfirm, setLockConfirm] = useState(null);
+  const [unlockConfirm, setUnlockConfirm] = useState(null);
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -62,6 +64,44 @@ const AdminDashboard = () => {
     }
   };
 
+  // 🔥 LOCK USER ACCOUNT
+  const handleLockUser = async (userId) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { 
+        status: 'locked',
+        lockedAt: new Date().toISOString(),
+        lockReason: 'Payment required - Please contact admin'
+      });
+      setLockConfirm(null);
+      await loadUsers();
+      setSuccess('🔒 User account has been locked successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error('Error locking user:', err);
+      setError('❌ Failed to lock user: ' + err.message);
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  // 🔓 UNLOCK USER ACCOUNT
+  const handleUnlockUser = async (userId) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { 
+        status: 'active',
+        lockedAt: null,
+        lockReason: null
+      });
+      setUnlockConfirm(null);
+      await loadUsers();
+      setSuccess('🔓 User account has been unlocked successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error('Error unlocking user:', err);
+      setError('❌ Failed to unlock user: ' + err.message);
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setIsCreating(true);
@@ -71,7 +111,6 @@ const AdminDashboard = () => {
     try {
       const trimmedEmail = formData.email.trim();
 
-      // Check if user already exists in Firestore
       const q = query(collection(db, 'users'), where('email', '==', trimmedEmail));
       const snapshot = await getDocs(q);
       
@@ -81,7 +120,6 @@ const AdminDashboard = () => {
         return;
       }
 
-      // Safe creation using secondaryAuth to avoid revoking active Admin session
       const userCredential = await createUserWithEmailAndPassword(
         secondaryAuth,
         trimmedEmail,
@@ -91,7 +129,6 @@ const AdminDashboard = () => {
 
       const userRole = formData.isAdmin ? 'admin' : 'student';
 
-      // Store in Firestore
       await setDoc(doc(db, 'users', firebaseUser.uid), {
         displayName: formData.fullName,
         email: trimmedEmail,
@@ -114,10 +151,8 @@ const AdminDashboard = () => {
         }
       });
 
-      // Sign out from secondary app instance immediately
       await signOut(secondaryAuth);
 
-      // Cache locally
       const storedUsers = localStorage.getItem('cbt_users');
       const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
       localUsers.push({
@@ -255,6 +290,7 @@ const AdminDashboard = () => {
     { label: 'Total Users', value: users.length, icon: Users, bgColor: 'bg-blue-50', textColor: 'text-blue-600' },
     { label: 'Active Users', value: users.filter(u => u.status === 'active').length, icon: UserCheck, bgColor: 'bg-green-50', textColor: 'text-green-600' },
     { label: 'Inactive Users', value: users.filter(u => u.status === 'inactive').length, icon: UserX, bgColor: 'bg-red-50', textColor: 'text-red-600' },
+    { label: 'Locked Users', value: users.filter(u => u.status === 'locked').length, icon: Lock, bgColor: 'bg-red-50', textColor: 'text-red-600' },
     { label: 'Admins', value: users.filter(u => u.isAdmin || u.role === 'admin').length, icon: Shield, bgColor: 'bg-purple-50', textColor: 'text-purple-600' },
   ];
 
@@ -301,7 +337,7 @@ const AdminDashboard = () => {
           </motion.div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           {stats.map((stat, idx) => (
             <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1 }} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200">
               <div className="flex items-center justify-between">
@@ -330,6 +366,7 @@ const AdminDashboard = () => {
                   <option value="all">All Status</option>
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
+                  <option value="locked">🔒 Locked</option>
                 </select>
               </div>
             </div>
@@ -421,6 +458,57 @@ const AdminDashboard = () => {
           </motion.div>
         )}
 
+        {/* 🔒 LOCK CONFIRMATION MODAL */}
+        {lockConfirm && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                  <Lock className="w-6 h-6 text-red-600" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-800">🔒 Lock User Account</h3>
+              </div>
+              <p className="text-gray-600 mb-2">
+                Are you sure you want to lock this user's account?
+              </p>
+              <p className="text-sm text-gray-500 mb-6">
+                The user will see a payment modal when they try to login with your bank details.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setLockConfirm(null)} className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-gray-50 font-medium">Cancel</button>
+                <button onClick={() => handleLockUser(lockConfirm)} className="flex-1 px-4 py-2 bg-gradient-to-r from-red-500 to-rose-500 text-white rounded-xl font-medium flex items-center justify-center gap-2">
+                  <Lock className="w-4 h-4" />
+                  Lock User
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* 🔓 UNLOCK CONFIRMATION MODAL */}
+        {unlockConfirm && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                  <Unlock className="w-6 h-6 text-green-600" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-800">🔓 Unlock User Account</h3>
+              </div>
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to unlock this user's account? They will be able to login again.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setUnlockConfirm(null)} className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-gray-50 font-medium">Cancel</button>
+                <button onClick={() => handleUnlockUser(unlockConfirm)} className="flex-1 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-medium flex items-center justify-center gap-2">
+                  <Unlock className="w-4 h-4" />
+                  Unlock User
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {deleteConfirm && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
@@ -503,13 +591,16 @@ const AdminDashboard = () => {
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
-                            u.isAdmin || u.role === 'admin' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                            u.isAdmin || u.role === 'admin' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 
+                            u.status === 'locked' ? 'bg-gradient-to-r from-red-500 to-rose-500' :
+                            'bg-gradient-to-r from-blue-500 to-indigo-500'
                           }`}>
                             {u.displayName?.charAt(0).toUpperCase() || 'U'}
                           </div>
                           <span className="font-medium text-gray-800">
                             {u.displayName}
                             {(u.isAdmin || u.role === 'admin') && <span className="ml-2 text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">👑 Admin</span>}
+                            {u.status === 'locked' && <span className="ml-2 text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">🔒 Locked</span>}
                           </span>
                         </div>
                       </td>
@@ -522,21 +613,51 @@ const AdminDashboard = () => {
                       </td>
                       <td className="py-3 px-4">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 w-fit ${
-                          u.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                          u.status === 'active' ? 'bg-green-100 text-green-700' : 
+                          u.status === 'locked' ? 'bg-red-100 text-red-700' :
+                          'bg-red-100 text-red-700'
                         }`}>
                           {u.status === 'active' ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                           {u.status || 'active'}
                         </span>
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex gap-1.5">
-                          <button onClick={() => handleToggleStatus(u.id, u.status)} className={`p-1.5 rounded-lg ${u.status === 'active' ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600'}`}>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {/* 🔒 LOCK / UNLOCK BUTTON */}
+                          {u.status === 'locked' ? (
+                            <button 
+                              onClick={() => setUnlockConfirm(u.id)} 
+                              className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" 
+                              title="Unlock User"
+                            >
+                              <Unlock className="w-4 h-4" />
+                            </button>
+                          ) : u.status === 'active' ? (
+                            <button 
+                              onClick={() => setLockConfirm(u.id)} 
+                              className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition" 
+                              title="Lock User"
+                            >
+                              <Lock className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                          
+                          {/* SUSPEND / ACTIVATE BUTTON */}
+                          <button 
+                            onClick={() => handleToggleStatus(u.id, u.status)} 
+                            className={`p-1.5 rounded-lg ${u.status === 'active' ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600'}`}
+                            title={u.status === 'active' ? 'Suspend User' : 'Activate User'}
+                          >
                             {u.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                           </button>
-                          <button onClick={() => setResetPasswordData(u.id)} className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-                            <Lock className="w-4 h-4" />
+                          
+                          {/* RESET PASSWORD */}
+                          <button onClick={() => setResetPasswordData(u.id)} className="p-1.5 bg-blue-50 text-blue-600 rounded-lg" title="Reset Password">
+                            <RefreshCw className="w-4 h-4" />
                           </button>
-                          <button onClick={() => setDeleteConfirm(u.id)} className="p-1.5 bg-red-50 text-red-600 rounded-lg">
+                          
+                          {/* DELETE USER */}
+                          <button onClick={() => setDeleteConfirm(u.id)} className="p-1.5 bg-red-50 text-red-600 rounded-lg" title="Delete User">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
